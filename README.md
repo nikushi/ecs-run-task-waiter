@@ -14,7 +14,7 @@ One of the following is required:
 Optional arguments:
     --log-group-name             Name of the log group
     --log-stream-prefix          Prefix of log stream
-    -t | --timeout               Default is 90s. Script monitors ECS Service for new task definition to be running.
+    -t | --timeout               Default is 10min
     -v | --verbose               Verbose output
 Requirements:
     aws:  AWS Command Line Interface
