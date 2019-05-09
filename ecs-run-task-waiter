@@ -4,9 +4,12 @@ set -ue
 
 # default values
 CLUSTER=false
+LOG_GROUP_NAME=false
+LOG_STREAM_PREFIX=false
 TIMEOUT=600
 AWS_CLI=$(which aws)
 AWS_ECS="$AWS_CLI --output json ecs"
+AWS_LOGS="$AWS_CLI --output json logs"
 VERBOSE=false
 
 function usage() {
@@ -19,6 +22,8 @@ One of the following is required:
     -p | --profile               AWS Profile to use - If you set this aws-access-key, aws-secret-key and region are needed
     -c | --cluster               Name of ECS cluster
 Optional arguments:
+    --log-group-name             Name of the log group
+    --log-stream-prefix          Prefix of log stream
     -t | --timeout               Default is 90s. Script monitors ECS Service for new task definition to be running.
     -v | --verbose               Verbose output
 Requirements:
@@ -39,11 +44,13 @@ function assertRequiredArgumentsSet() {
     unset AWS_DEFAULT_REGION
   else
     AWS_ECS="$AWS_ECS --region $AWS_DEFAULT_REGION"
+    AWS_LOGS="$AWS_LOGS --region $AWS_DEFAULT_REGION"
   fi
   if [ -z ${AWS_PROFILE+x} ]; then
     unset AWS_PROFILE
   else
     AWS_ECS="$AWS_ECS --profile $AWS_PROFILE"
+    AWS_LOGS="$AWS_LOGS --profile $AWS_PROFILE"
   fi
 
   if [ $CLUSTER == false ]; then
@@ -51,6 +58,19 @@ function assertRequiredArgumentsSet() {
     exit 7
   fi
 
+}
+
+function isOutputLog() {
+  [ $LOG_GROUP_NAME != false ] && [ $LOG_STREAM_PREFIX != false ]
+  return $?
+}
+
+function buildLogStreamName() {
+  task_arn=$1
+  task_id="$(echo $task_arn | awk -F / '{print $2}')"
+  container_name=$2
+  prefix=$LOG_STREAM_PREFIX
+  echo "${prefix}/${container_name}/${task_id}"
 }
 
 #
@@ -76,6 +96,14 @@ do
       ;;
     -c|--cluster)
       CLUSTER="$2"
+      shift # past argument
+      ;;
+    --log-group-name)
+      LOG_GROUP_NAME="$2"
+      shift # past argument
+      ;;
+    --log-stream-prefix)
+      LOG_STREAM_PREFIX="$2"
       shift # past argument
       ;;
     -t|--timeout)
@@ -113,7 +141,8 @@ echo "taskArn: ${task_arn}"
 
 container="$(echo $task | jq .containers[0])"
 echo "containerArn: $(echo $container | jq -r .containerArn)"
-echo "container name: $(echo $container | jq -r .name)"
+container_name="$(echo $container | jq -r .name)"
+echo "container name: ${container_name}"
 
 # polling
 timedout="true"
@@ -140,10 +169,19 @@ done
 
 if [[ $timedout = 'true' ]]; then
   echo "ERROR: run-task did not finished within ${TIMEOUT} seconds" > /dev/stderr
+  exit $exit_code
 fi
 
 if [[ $exit_code -ne 0 ]]; then
   echo 'ERROR: run-task failed' > /dev/stderr
+fi
+
+isOutputLog
+if [ $? -eq 0 ]; then
+  echo
+  log_stream_name="$(buildLogStreamName $task_arn $container_name)"
+  echo "run-task output from the log stream ${log_stream_name}:"
+  $AWS_LOGS get-log-events --log-group-name $LOG_GROUP_NAME --log-stream-name $log_stream_name | jq -r '.events | .[] | .message'
 fi
 
 exit $exit_code
