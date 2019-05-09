@@ -1,0 +1,149 @@
+#!/usr/bin/env bash
+
+set -ue
+
+# default values
+CLUSTER=false
+TIMEOUT=600
+AWS_CLI=$(which aws)
+AWS_ECS="$AWS_CLI --output json ecs"
+VERBOSE=false
+
+function usage() {
+  cat <<EOM
+##### ecs-run-task-waiter #####
+Simple script for waiting run-task execution completion on Amazon Elastic Container Service
+
+One of the following is required:
+    -r | --region                AWS Region Name. May also be set as environment variable AWS_DEFAULT_REGION
+    -p | --profile               AWS Profile to use - If you set this aws-access-key, aws-secret-key and region are needed
+    -c | --cluster               Name of ECS cluster
+Optional arguments:
+    -t | --timeout               Default is 90s. Script monitors ECS Service for new task definition to be running.
+    -v | --verbose               Verbose output
+Requirements:
+    aws:  AWS Command Line Interface
+    jq:   Command-line JSON processor
+Examples:
+  aws ecs run-task-waiter --profile foo --region ap-northeast-1  --cluster mycluster --task-definition mytask --network-configuration '{"awsvpcConfiguration":{"subnets":["subnet-abc"],"securityGroups":["sg-123"],"assignPublicIp":"ENABLED"}}' --launch-type FARGATE | ecs-run-task-waiter -r ap-northeast-1  -p foo -c mycluster
+EOM
+
+  exit 3
+}
+
+# Check that all required variables/combinations are set
+function assertRequiredArgumentsSet() {
+
+  # AWS_DEFAULT_REGION and AWS_PROFILE can be set as environment variables
+  if [ -z ${AWS_DEFAULT_REGION+x} ]; then
+    unset AWS_DEFAULT_REGION
+  else
+    AWS_ECS="$AWS_ECS --region $AWS_DEFAULT_REGION"
+  fi
+  if [ -z ${AWS_PROFILE+x} ]; then
+    unset AWS_PROFILE
+  else
+    AWS_ECS="$AWS_ECS --profile $AWS_PROFILE"
+  fi
+
+  if [ $CLUSTER == false ]; then
+    echo "CLUSTER is required. You can pass the value using -c or --cluster"
+    exit 7
+  fi
+
+}
+
+#
+# main
+#
+
+# If no args are provided, display usage information
+if [ $# == 0 ]; then usage; fi
+
+# Loop through arguments, two at a time for key and value
+while [[ $# -gt 0 ]]
+do
+  key="$1"
+
+  case $key in
+    -r|--region)
+      AWS_DEFAULT_REGION="$2"
+      shift # past argument
+      ;;
+    -p|--profile)
+      AWS_PROFILE="$2"
+      shift # past argument
+      ;;
+    -c|--cluster)
+      CLUSTER="$2"
+      shift # past argument
+      ;;
+    -t|--timeout)
+      TIMEOUT="$2"
+      shift
+      ;;
+    -v|--verbose)
+      VERBOSE=true
+      ;;
+    *)
+      usage
+      exit 2
+      ;;
+  esac
+  shift # past argument or value
+done
+
+if [ $VERBOSE == true ]; then
+  set -x
+fi
+
+# Check that required arguments are provided
+assertRequiredArgumentsSet
+
+# Check the program is called after pipe
+if [[ ! -p /dev/stdin ]]; then
+  echo "ecs-run-task-waiter only works as a filter program" > /dev/stderr
+  usage
+fi
+
+run_task_out="$(cat -)"
+task="$(echo $run_task_out | jq .tasks[0])"
+task_arn=$(echo $task | jq -r .taskArn)
+echo "taskArn: ${task_arn}"
+
+container="$(echo $task | jq .containers[0])"
+echo "containerArn: $(echo $container | jq -r .containerArn)"
+echo "container name: $(echo $container | jq -r .name)"
+
+# polling
+timedout="true"
+exit_code=1
+every=10
+i=0
+while [ $i -lt $TIMEOUT ]; do
+  describe_tasks_out="$(${AWS_ECS} describe-tasks --cluster ${CLUSTER} --tasks ${task_arn})"
+  t="$(echo $describe_tasks_out | jq .tasks[0])"
+  c="$(echo $t | jq .containers[0])"
+  st="$(echo $c | jq -r .lastStatus)"
+
+  echo "[$(date +%Y-%m-%dT%H:%M:%S%z)] $st"
+  if [[ $st = 'STOPPED' ]]; then
+    # Note: exitCode is null unless status is STOPPED
+    exit_code="$(echo $c | jq -r .exitCode)"
+    timedout="false"
+    break
+  fi
+
+  sleep $every
+  i=$(( $i + $every ))
+done
+
+if [[ $timedout = 'true' ]]; then
+  echo "ERROR: run-task did not finished within ${TIMEOUT} seconds" > /dev/stderr
+fi
+
+if [[ $exit_code -ne 0 ]]; then
+  echo 'ERROR: run-task failed' > /dev/stderr
+fi
+
+exit $exit_code
