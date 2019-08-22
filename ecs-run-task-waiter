@@ -3,7 +3,6 @@
 set -ue
 
 # default values
-CLUSTER=false
 LOG_GROUP_NAME=false
 LOG_STREAM_PREFIX=false
 TIMEOUT=600
@@ -20,7 +19,6 @@ Simple script for waiting run-task execution completion on Amazon Elastic Contai
 One of the following is required:
     -r | --region                AWS Region Name. May also be set as environment variable AWS_DEFAULT_REGION
     -p | --profile               AWS Profile to use - If you set this aws-access-key, aws-secret-key and region are needed
-    -c | --cluster               Name of ECS cluster
 Optional arguments:
     --log-group-name             Name of the log group
     --log-stream-prefix          Prefix of log stream
@@ -51,11 +49,6 @@ function assertRequiredArgumentsSet() {
   else
     AWS_ECS="$AWS_ECS --profile $AWS_PROFILE"
     AWS_LOGS="$AWS_LOGS --profile $AWS_PROFILE"
-  fi
-
-  if [ $CLUSTER == false ]; then
-    echo "CLUSTER is required. You can pass the value using -c or --cluster"
-    exit 7
   fi
 
 }
@@ -92,10 +85,6 @@ do
       ;;
     -p|--profile)
       AWS_PROFILE="$2"
-      shift # past argument
-      ;;
-    -c|--cluster)
-      CLUSTER="$2"
       shift # past argument
       ;;
     --log-group-name)
@@ -136,6 +125,9 @@ fi
 
 run_task_out="$(cat -)"
 task="$(echo $run_task_out | jq .tasks[0])"
+cluster_arn=$(echo $task | jq -r .clusterArn)
+echo "clusterArn: ${cluster_arn}"
+
 task_arn=$(echo $task | jq -r .taskArn)
 echo "taskArn: ${task_arn}"
 
@@ -150,7 +142,7 @@ exit_code=1
 every=10
 i=0
 while [ $i -lt $TIMEOUT ]; do
-  describe_tasks_out="$(${AWS_ECS} describe-tasks --cluster ${CLUSTER} --tasks ${task_arn})"
+  describe_tasks_out="$(${AWS_ECS} describe-tasks --cluster ${cluster_arn} --tasks ${task_arn})"
   t="$(echo $describe_tasks_out | jq .tasks[0])"
   c="$(echo $t | jq .containers[0])"
   st="$(echo $c | jq -r .lastStatus)"
