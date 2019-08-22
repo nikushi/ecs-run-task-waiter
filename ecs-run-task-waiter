@@ -3,8 +3,7 @@
 set -ue
 
 # default values
-LOG_GROUP_NAME=false
-LOG_STREAM_PREFIX=false
+OUTPUT_LOG=false
 TIMEOUT=600
 AWS_CLI=$(which aws)
 AWS_ECS="$AWS_CLI --output json ecs"
@@ -20,8 +19,7 @@ One of the following is required:
     -r | --region                AWS Region Name. May also be set as environment variable AWS_DEFAULT_REGION
     -p | --profile               AWS Profile to use - If you set this aws-access-key, aws-secret-key and region are needed
 Optional arguments:
-    --log-group-name             Name of the log group
-    --log-stream-prefix          Prefix of log stream
+    --output-log                 Output task logs. Default false
     -t | --timeout               Default is 90s. Script monitors ECS Service for new task definition to be running.
     -v | --verbose               Verbose output
 Requirements:
@@ -53,16 +51,11 @@ function assertRequiredArgumentsSet() {
 
 }
 
-function isOutputLog() {
-  [ $LOG_GROUP_NAME != false ] && [ $LOG_STREAM_PREFIX != false ]
-  return $?
-}
-
 function buildLogStreamName() {
   task_arn=$1
   task_id="$(echo $task_arn | awk -F / '{print $2}')"
   container_name=$2
-  prefix=$LOG_STREAM_PREFIX
+  prefix=$3
   echo "${prefix}/${container_name}/${task_id}"
 }
 
@@ -87,13 +80,8 @@ do
       AWS_PROFILE="$2"
       shift # past argument
       ;;
-    --log-group-name)
-      LOG_GROUP_NAME="$2"
-      shift # past argument
-      ;;
-    --log-stream-prefix)
-      LOG_STREAM_PREFIX="$2"
-      shift # past argument
+    --output-log)
+      OUTPUT_LOG=true
       ;;
     -t|--timeout)
       TIMEOUT="$2"
@@ -131,8 +119,12 @@ echo "clusterArn: ${cluster_arn}"
 task_arn=$(echo $task | jq -r .taskArn)
 echo "taskArn: ${task_arn}"
 
+task_definition_arn=$(echo $task | jq -r .taskDefinitionArn)
+echo "taskDefinitionArn: ${task_definition_arn}"
+
 container="$(echo $task | jq .containers[0])"
 echo "containerArn: $(echo $container | jq -r .containerArn)"
+
 container_name="$(echo $container | jq -r .name)"
 echo "container name: ${container_name}"
 
@@ -168,12 +160,15 @@ if [[ $exit_code -ne 0 ]]; then
   echo 'ERROR: run-task failed' > /dev/stderr
 fi
 
-isOutputLog
-if [ $? -eq 0 ]; then
+if [ $OUTPUT_LOG == true ]; then
+  describe_tasks_out="$(${AWS_ECS} describe-task-definition --task-definition ${task_definition_arn})"
+  log_options="$(echo $describe_tasks_out | jq .taskDefinition.containerDefinitions[0].logConfiguration.options)"
+  log_group_name="$(echo $log_options | jq -r '.["awslogs-group"]')"
+  log_stream_prefix="$(echo $log_options | jq -r '.["awslogs-stream-prefix"]')"
+  log_stream_name="$(buildLogStreamName $task_arn $container_name $log_stream_prefix)"
   echo
-  log_stream_name="$(buildLogStreamName $task_arn $container_name)"
   echo "run-task output from the log stream ${log_stream_name}:"
-  $AWS_LOGS get-log-events --log-group-name $LOG_GROUP_NAME --log-stream-name $log_stream_name | jq -r '.events | .[] | .message'
+  $AWS_LOGS get-log-events --log-group-name $log_group_name --log-stream-name $log_stream_name | jq -r '.events | .[] | .message'
 fi
 
 exit $exit_code
