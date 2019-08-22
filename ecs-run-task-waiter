@@ -28,7 +28,7 @@ Requirements:
     aws:  AWS Command Line Interface
     jq:   Command-line JSON processor
 Examples:
-  aws ecs run-task-waiter --profile foo --region ap-northeast-1  --cluster mycluster --task-definition mytask --network-configuration '{"awsvpcConfiguration":{"subnets":["subnet-abc"],"securityGroups":["sg-123"],"assignPublicIp":"ENABLED"}}' --launch-type FARGATE | ecs-run-task-waiter -r ap-northeast-1  -p foo -c mycluster
+  aws ecs run-task --profile foo --region ap-northeast-1 --cluster mycluster --task-definition mytask --network-configuration '{"awsvpcConfiguration":{"subnets":["subnet-abc"],"securityGroups":["sg-123"],"assignPublicIp":"ENABLED"}}' --launch-type FARGATE | ecs-run-task-waiter -r ap-northeast-1  -p foo
 EOM
 
   exit 3
