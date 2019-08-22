@@ -63,9 +63,6 @@ function buildLogStreamName() {
 # main
 #
 
-# If no args are provided, display usage information
-if [ $# == 0 ]; then usage; fi
-
 # Loop through arguments, two at a time for key and value
 while [[ $# -gt 0 ]]
 do
