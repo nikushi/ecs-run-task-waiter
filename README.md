@@ -24,3 +24,12 @@ Examples:
     --network-configuration '{"awsvpcConfiguration":{"subnets":["subnet-abc"],"securityGroups":["sg-123"],"assignPublicIp":"ENABLED"}}' \
     --launch-type FARGATE | ecs-run-task-waiter -r ap-northeast-1  -p foo -c mycluster
 ````
+
+## Development
+
+### Release
+
+To make a release with the executable:
+
+1. Change version num, then commit it to git.
+2. Release them with a new release by `TAG=v0.1.0 make release`
