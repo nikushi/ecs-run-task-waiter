@@ -16,6 +16,7 @@ Optional arguments:
     --log-stream-prefix          Prefix of log stream
     -t | --timeout               Default is 10min
     -v | --verbose               Verbose output
+    --version                    Print version
 Requirements:
     aws:  AWS Command Line Interface
     jq:   Command-line JSON processor
